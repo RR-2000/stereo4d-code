@@ -950,9 +950,6 @@ def optimize_track_main(vid: str, save_root: str, npz_folder: str, hfov: float):
 
 def main():
   parser = argparse.ArgumentParser()
-  # parser.add_argument('--vid', help='video id, in the format of <raw-video-id>_<timestamp>', type=str)
-  # parser.add_argument('--npz_folder', help='npz folder', type=str, default='stereo4d_dataset/npz')
-  # parser.add_argument('--output_folder', help='output folder', type=str, default='stereo4d_dataset/processed')
   parser.add_argument('--hfov', help='horizontal fov', type=float, default=1.09375)
 
   parser.add_argument('--num_views', help='number of views', type=int, default=5)
@@ -963,6 +960,21 @@ def main():
   for idx in range(args.num_views):
 
     optimize_track_main(f'view_{idx}', args.dir, args.dir, args.hfov)
+
+  full_tracks = []
+  for idx in range(args.num_views):
+    path = osp.join(args.dir, f'view_{idx}', f'view_{idx}' + '-optimized_tracks.pkl')
+    with open(path, 'rb',) as f:
+      arr = pickle.load(f)
+      full_tracks.append(arr['track3d'])
+
+  full_tracks = np.concatenate(full_tracks, axis=0)
+  full_tracks = full_tracks.transpose(1,0,2)
+  print(f'Saving combined tracks to { osp.join(args.dir, 'stereo4d_tracks')} with shape {full_tracks.shape}')
+
+  np.save(osp.join(args.dir, 'stereo4d_tracks'),full_tracks)
+
+
 
 if __name__ == '__main__':
   main()

@@ -318,9 +318,6 @@ def segmentation_main(vid: str, save_root: str, npz_folder: str, hfov: float):
 
 def main():
   parser = argparse.ArgumentParser()
-  # parser.add_argument('--vid', help='video id, in the format of <raw-video-id>_<timestamp>', type=str)
-  # parser.add_argument('--npz_folder', help='npz folder', type=str, default='stereo4d_dataset/npz')
-  # parser.add_argument('--output_folder', help='output folder', type=str, default='stereo4d_dataset/processed')
   parser.add_argument('--hfov', help='horizontal fov', type=float, default=1.09375)
 
   parser.add_argument('--num_views', help='number of views', type=int, default=5)
@@ -332,10 +329,6 @@ def main():
 
     segmentation_main(f'view_{idx}', args.dir, args.dir, args.hfov)
 
-
-  # args = parser.parse_args()
-
-  # segmentation_main(args.vid, args.output_folder, args.npz_folder, args.hfov)
 
 if __name__ == '__main__':
   main()
