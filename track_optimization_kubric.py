@@ -332,9 +332,9 @@ def optimize_tracks(track3d: utils.Track3d):
   points = points * masks  # Shape (Batch, N, 3)
 
   # Optimization hyperparameters.
-  w_static = 100.0
-  w_dynamic = 100.0
-  lambda_reg = 0.1
+  w_static = 0
+  w_dynamic = 0
+  lambda_reg = 0.5
   motion_threshold = 20
   optimal_batch_size = (
       10000  # Adjust this value according to your memory limits
@@ -905,6 +905,11 @@ def optimize_track_main(vid: str, save_root: str, npz_folder: str, hfov: float):
       input_dict['left']['video'],
       track2d['query_points'],
   )
+  with open(
+      osp.join(save_root, vid, vid + '-tapir_remove_drift_tracks3d.pkl'),
+      'wb',
+  ) as f:
+    track2d = pickle.dump(track3d.track3d, f)
   save_3d_track_vis(track3d, input_dict['left']['video'], input_dict['left']['depth'], save_root, vid, 'original')
 
   print(f'optimization start for {vid}')
@@ -952,14 +957,18 @@ def main():
   parser = argparse.ArgumentParser()
   parser.add_argument('--hfov', help='horizontal fov', type=float, default=1.09375)
 
-  parser.add_argument('--num_views', help='number of views', type=int, default=5)
+  parser.add_argument('--num_views', help='number of views', type=int, default=20)
+  parser.add_argument('--optimize', help='optimize tracks', type=bool, default=False)
+  parser.add_argument('--filter', help='Filter tracks', type=bool, default=False)
   parser.add_argument('--dir', help='path to views', type=str, default='/project/Thesis/kubric-private/output/multiview_36_v3/train/1')
 
   args = parser.parse_args()
 
-  for idx in range(args.num_views):
+  if args.optimize:
 
-    optimize_track_main(f'view_{idx}', args.dir, args.dir, args.hfov)
+    for idx in tqdm.tqdm(range(args.num_views)):
+
+      optimize_track_main(f'view_{idx}', args.dir, args.dir, args.hfov)
 
   full_tracks = []
   for idx in range(args.num_views):
@@ -969,7 +978,16 @@ def main():
       full_tracks.append(arr['track3d'])
 
   full_tracks = np.concatenate(full_tracks, axis=0)
-  full_tracks = full_tracks.transpose(1,0,2)
+  invalid = np.any(np.isnan(full_tracks.reshape(full_tracks.shape[0], -1)), axis= 1)
+  full_tracks = full_tracks[ ~invalid].transpose(1,0,2)
+
+  if args.filter:
+    static_points = np.linalg.norm(full_tracks[0] - full_tracks[-1], axis=-1) < 0.005
+    print(static_points.shape)
+    print(static_points.mean())
+    print(static_points.sum())
+    full_tracks = full_tracks[:, ~static_points]
+    
   print(f'Saving combined tracks to { osp.join(args.dir, 'stereo4d_tracks')} with shape {full_tracks.shape}')
 
   np.save(osp.join(args.dir, 'stereo4d_tracks'),full_tracks)
