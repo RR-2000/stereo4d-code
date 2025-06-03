@@ -4,8 +4,12 @@ import warnings
 import json
 import os
 from PIL import Image
+import glob
+from scipy.ndimage import gaussian_filter
 import imageio
 import pathlib
+
+NOISE_SCALE = 10
 
 
 def pixel_xy_and_camera_z_to_world_space(pixel_xy, camera_z, intrs_inv, extrs_inv):
@@ -84,18 +88,6 @@ def read_cam(sequence :str, idx :int):
 
     return depth, imgs, intrinsics, extrinsics, cam_ID
 
-def read_cam_dex(sequence :str, idx :int):
-
-    meta = np.load(os.path.join(sequence, f'view_{idx:02d}', 'intrinsics_extrinsics.npz'))
-
-    cam_ID = idx
-    intrinsics = meta['intrinsics'][:3, :3]
-    extrinsics = meta['extrinsics']
-    depth = read_images_from_directory(os.path.join(sequence, f'view_{idx:02d}', 'depth'))/1000
-    imgs = read_images_from_directory(os.path.join(sequence, f'view_{idx:02d}', 'rgb'))
-
-    return depth, imgs, intrinsics, extrinsics, cam_ID
-
 def quaternion_to_rotation_matrix(quaternions):
     """
     Converts a batch of quaternions to corresponding rotation matrices.
@@ -125,7 +117,68 @@ def quaternion_to_rotation_matrix(quaternions):
 
     return R
 
-def read_cam_kubric(sequence :str, idx :int, depth_euclid = False, query_points = None):
+def add_depth_noise(depth, noise_type='gaussian', sigma=0.01, outlier_ratio=0.05, max_noise=0.05, smooth_sigma=1.0):
+    """
+    Add noise to depth values with optional 2D smoothing.
+    
+    Args:
+        depth (np.ndarray): Input depth values
+        noise_type (str): Type of noise ('gaussian', 'saltpepper', or 'both')
+        sigma (float): Standard deviation for Gaussian noise
+        outlier_ratio (float): Ratio of outlier pixels for salt and pepper noise
+        max_noise (float): Maximum magnitude of outlier noise
+        smooth_sigma (float): Standard deviation for Gaussian smoothing (set to 0 to disable)
+    
+    Returns:
+        np.ndarray: Depth with added noise
+    """
+    if not isinstance(depth, np.ndarray):
+        depth = np.array(depth)
+    
+    noisy_depth = depth.copy()
+    
+    if noise_type in ['gaussian', 'both']:
+        # Add Gaussian noise
+        noise = np.random.normal(0, sigma, depth.shape)
+        
+        # Smooth the noise in 2D space
+        if smooth_sigma > 0:
+            noise = gaussian_filter(noise, sigma=smooth_sigma)
+        
+        noisy_depth += NOISE_SCALE*noise
+    
+    if noise_type in ['saltpepper', 'both']:
+        # Add salt and pepper noise (outliers)
+        mask_shape = depth.shape
+        outlier_mask = np.random.random(mask_shape) < outlier_ratio
+        
+        # Generate outlier noise values
+        outlier_noise = np.random.uniform(-max_noise, max_noise, mask_shape)
+        
+        # Smooth the outlier noise in 2D space
+        if smooth_sigma > 0:
+            outlier_noise = gaussian_filter(outlier_noise, sigma=smooth_sigma)
+        
+        noisy_depth[outlier_mask] += outlier_noise[outlier_mask]
+    
+    # Ensure we don't have negative depth values
+    noisy_depth = np.maximum(noisy_depth, 0)
+    
+    return noisy_depth
+
+
+def read_cam_kubric(sequence :str, idx :int, depth_euclid = False, query_points = None, noise_sigma: float = None, depth: str = 'gt', num_cams: int = 20):
+    if depth == 'gt':
+        return read_cam_kubric_gt(sequence, idx, depth_euclid, query_points, noise_sigma)
+    elif depth == 'vggt':
+        return read_cam_kubric_vggt(sequence, idx, depth_euclid, query_points, noise_sigma, num_cams=num_cams)
+    elif depth == 'dust3r':
+        return read_cam_kubric_dust3r(sequence, idx, depth_euclid, query_points, noise_sigma, num_cams=num_cams)
+    else:
+        raise ValueError(f"Unknown depth type: {depth}. Use 'gt', 'vggt', or 'dust3r'.")
+
+
+def read_cam_kubric_gt(sequence :str, idx :int, depth_euclid = False, query_points = None, noise_sigma: float = None):
 
     meta = json.load(open(os.path.join(sequence, f'view_{idx}', 'metadata.json')))
 
@@ -182,6 +235,171 @@ def read_cam_kubric(sequence :str, idx :int, depth_euclid = False, query_points 
         depth = q_depth
     if not depth_euclid:
         depth = depth_from_euclidean_to_z(depth, sensor_width, focal_length)
+    if noise_sigma is not None:
+        depth = add_depth_noise(depth, noise_type='gaussian', sigma=noise_sigma, smooth_sigma=1)
+
+    imgs = read_images_from_directory(os.path.join(sequence, f'view_{idx}'), prefix='rgba_')[..., :3]
+
+    return depth, imgs, intrinsics_normal, intrinsics, extrinsics, cam_ID
+
+
+def read_cam_kubric_vggt(sequence :str, idx :int, depth_euclid = False, query_points = None, noise_sigma: float = None, num_cams = 20):
+
+    meta = json.load(open(os.path.join(sequence, f'view_{idx}', 'metadata.json')))
+
+    cam_ID = idx
+    vggt_label = 'vggt_kubric_views_012345678910111213141516171819_v2'
+    if num_cams == 8:
+        vggt_label = 'vggt_kubric_views_01234567_v2'
+    elif num_cams == 6:
+        vggt_label = 'vggt_kubric_views_012345_v2'
+    elif num_cams == 4:
+        vggt_label = 'vggt_kubric_views_0123_v2'
+
+    vggt_path = os.path.join(sequence, f'{vggt_label}/1',  f'view_{idx}')
+    num_frame = len(glob.glob(vggt_path + '/*.npz'))
+    extrinsics = []
+    intrinsics = []
+    depth = []
+    for frame_id in range(num_frame):
+        ext_4x4 = np.eye(4)
+        ext_4x4 = np.load(os.path.join(vggt_path, f'intrinsics_extrinsics_{frame_id}.npz'))['extrinsics']
+        intrinsics.append(np.load(os.path.join(vggt_path, f'intrinsics_extrinsics_{frame_id}.npz'))['intrinsics'])
+        extrinsics.append(ext_4x4)
+        depth.append(np.load(os.path.join(vggt_path, 'depth', f'{frame_id:05d}.npy')))
+    extrinsics = np.asarray(extrinsics)
+    
+    intrinsics = np.asarray(intrinsics)
+    depth = np.asarray(depth)
+
+    # Extracting the extrinsics Fixed Cams -> only first TS
+    positions = torch.tensor(meta['camera']['positions'][0], dtype=torch.float64)
+    quaternions = torch.tensor(meta['camera']['quaternions'][0], dtype=torch.float64)
+    rotation_matrices = quaternion_to_rotation_matrix(quaternions)
+    
+    extrinsics_inv = torch.zeros((4, 4), dtype=torch.float64)
+    extrinsics_inv[:3, :3] = rotation_matrices
+    extrinsics_inv[:3, 3] = positions
+    extrinsics_inv[3, 3] = 1
+    extrinsics = extrinsics_inv.inverse().cpu().numpy()
+    extrinsics = np.diag([1, -1, -1, 1]) @ extrinsics
+
+    intrinsics_normal = intrinsics.copy()
+    intrinsics = meta['camera']['K']
+    intrinsics_normal = np.asarray(intrinsics)
+    w, h = meta['metadata']["resolution"]
+    intrinsics = np.diag([w, h, 1]) @ intrinsics @ np.diag([1, -1, -1])
+
+
+
+    if query_points is not None:
+        q_depth = np.zeros((depth.shape[0], query_points.shape[1]), dtype=np.float32)
+        for i in range(depth.shape[0]):
+            x = query_points[:, 0]
+            y = query_points[:, 1]
+            x0 = x
+            y0 = y
+            x1 = x0 + 1
+            y1 = y0 + 1
+
+            x0 = torch.clamp(x0, 0, depth.shape[2] - 1)
+            x1 = torch.clamp(x1, 0, depth.shape[2] - 1)
+            y0 = torch.clamp(y0, 0, depth.shape[1] - 1)
+            y1 = torch.clamp(y1, 0, depth.shape[1] - 1)
+
+            Ia = depth[i, y0, x0]
+            Ib = depth[i, y1, x0]
+            Ic = depth[i, y0, x1]
+            Id = depth[i, y1, x1]
+
+            wa = (x1 - x) * (y1 - y)
+            wb = (x1 - x) * (y - y0)
+            wc = (x - x0) * (y1 - y)
+            wd = (x - x0) * (y - y0)
+
+            q_depth[i] = wa * Ia + wb * Ib + wc * Ic + wd * Id
+        depth = q_depth
+
+    imgs = read_images_from_directory(os.path.join(sequence, f'view_{idx}'), prefix='rgba_')[..., :3]
+
+    return depth, imgs, intrinsics_normal, intrinsics, extrinsics, cam_ID
+
+
+def read_cam_kubric_dust3r(sequence :str, idx :int, depth_euclid = False, query_points = None, noise_sigma: float = None, num_cams = 20):
+
+    meta = json.load(open(os.path.join(sequence, f'view_{idx}', 'metadata.json')))
+
+    cam_ID = idx
+    intrinsics = meta['camera']['K']
+    intrinsics_normal = np.asarray(intrinsics)
+    extrinsics = meta['camera']['R']
+    sensor_width = meta['camera']['sensor_width']
+    focal_length = meta['camera']['focal_length']
+
+    # Extracting the extrinsics Fixed Cams -> only first TS
+    positions = torch.tensor(meta['camera']['positions'][0], dtype=torch.float64)
+    quaternions = torch.tensor(meta['camera']['quaternions'][0], dtype=torch.float64)
+    rotation_matrices = quaternion_to_rotation_matrix(quaternions)
+    
+    extrinsics_inv = torch.zeros((4, 4), dtype=torch.float64)
+    extrinsics_inv[:3, :3] = rotation_matrices
+    extrinsics_inv[:3, 3] = positions
+    extrinsics_inv[3, 3] = 1
+    extrinsics = extrinsics_inv.inverse().cpu().numpy()
+    extrinsics = np.diag([1, -1, -1, 1]) @ extrinsics
+
+    # Change the intrinsics to the format
+    w, h = meta['metadata']["resolution"]
+    intrinsics = np.diag([w, h, 1]) @ intrinsics @ np.diag([1, -1, -1])
+
+    duster_label = ''
+    if num_cams == 20:
+        duster_label = 'duster-views-012345678910111213141516171819'
+    elif num_cams == 8:
+        duster_label = 'duster-views-01234567'
+    elif num_cams == 6:
+        duster_label = 'duster-views-013467'
+    elif num_cams == 4:
+        duster_label = 'duster-views-0123'
+
+    depth_dir = os.path.join(sequence, f'{duster_label}')
+
+    depth_files = sorted(glob.glob(depth_dir + f'/*_scene.npz'))
+    depth = []
+    for depth_file in depth_files:
+        depth_data = np.load(depth_file)
+        depth.append(depth_data['depths'][idx])
+    depth = np.asarray(depth)
+
+    if query_points is not None:
+        q_depth = np.zeros((depth.shape[0], query_points.shape[1]), dtype=np.float32)
+        for i in range(depth.shape[0]):
+            x = query_points[:, 0]
+            y = query_points[:, 1]
+            x0 = x
+            y0 = y
+            x1 = x0 + 1
+            y1 = y0 + 1
+
+            x0 = torch.clamp(x0, 0, depth.shape[2] - 1)
+            x1 = torch.clamp(x1, 0, depth.shape[2] - 1)
+            y0 = torch.clamp(y0, 0, depth.shape[1] - 1)
+            y1 = torch.clamp(y1, 0, depth.shape[1] - 1)
+
+            Ia = depth[i, y0, x0]
+            Ib = depth[i, y1, x0]
+            Ic = depth[i, y0, x1]
+            Id = depth[i, y1, x1]
+
+            wa = (x1 - x) * (y1 - y)
+            wb = (x1 - x) * (y - y0)
+            wc = (x - x0) * (y1 - y)
+            wd = (x - x0) * (y - y0)
+
+            q_depth[i] = wa * Ia + wb * Ib + wc * Ic + wd * Id
+        depth = q_depth
+    if noise_sigma is not None:
+        depth = add_depth_noise(depth, noise_type='gaussian', sigma=noise_sigma, smooth_sigma=1)
 
     imgs = read_images_from_directory(os.path.join(sequence, f'view_{idx}'), prefix='rgba_')[..., :3]
 

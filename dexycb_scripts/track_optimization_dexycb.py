@@ -4,7 +4,9 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 import optax
-from kubric_utils import *
+import sys
+sys.path.append('./')
+from dexycb_utils import *
 import tqdm
 import numpy as np
 import math
@@ -340,7 +342,6 @@ def optimize_tracks(track3d: utils.Track3d):
   if REG == 'depth':
     w_static = 0.0
     w_dynamic = 0.0
-    lambda_reg = 0.5
   motion_threshold = 20
   optimal_batch_size = (
       10000  # Adjust this value according to your memory limits
@@ -420,19 +421,19 @@ def gradient_check_mask_relative(depth_map, threshold):
 
 
 
-def load_rgbd_cam(vid: str, root_dir: str, npz_folder: str,  hfov: float, new_imw=1, new_imh=1, noise_sigma: float = None, depth: str = 'gt', num_views: int = 20):
+def load_rgbd_cam(vid: str, root_dir: str, npz_folder: str,  hfov: float, new_imw=1, new_imh=1, depth: str = 'gt', num_views: int = 8):
   """load rgb, depth, and camera"""
   input_dict = {'left': {'camera': [], 'depth': [], 'video': []}}
   # Load camera
-  depths, rgbs, intrinsics_normal, intrinsics, extrinsics, cam_ID = read_cam_kubric(root_dir, int(vid.split('_')[-1]), depth_euclid = False, query_points = None, noise_sigma = noise_sigma, depth = depth, num_views=num_views)
+  depths, rgbs, intrinsics_normal, intrinsics, extrinsics, cam_ID = read_cam_dex(root_dir, int(vid.split('_')[-1]), query_points = None, depth = depth, num_cams=num_views)
   nfr = len(depths)
   input_dict['nfr'] = nfr
   for fid in range(nfr):
     intr_normalized = {
         'fx': intrinsics_normal[0,0] if len(intrinsics_normal.shape) == 2 else intrinsics_normal[fid][0, 0],
-        'fy': -1*intrinsics_normal[1,1] if len(intrinsics_normal.shape) == 2 else intrinsics_normal[fid][1, 1],
-        'cx': 0.5,
-        'cy': 0.5,
+        'fy': -1*intrinsics_normal[1,1] if len(intrinsics_normal.shape) == 2 else -1*intrinsics_normal[fid][1, 1],
+        'cx': -1*intrinsics_normal[0,2] if len(intrinsics_normal.shape) == 2 else -1*intrinsics_normal[fid][0, 2],
+        'cy': -1*intrinsics_normal[1,2] if len(intrinsics_normal.shape) == 2 else -1*intrinsics_normal[fid][1, 2],
         'k1': 0,
         'k2': 0,
     }
@@ -809,7 +810,7 @@ def plot_3d_tracks_with_camera(track3d: utils.Track3d, depth, rgb, axes=None, tr
 
   frames = []
   for t in tqdm.tqdm(range(num_frames), desc='plotting tracks'):
-    fig = Figure(figsize=(5.12, 5.12), dpi=100)
+    fig = Figure(figsize=(6.40, 4.80), dpi=100)
     canvas = FigureCanvasAgg(fig)
     ax = fig.add_subplot(111, projection='3d', computed_zorder=False)
 
@@ -888,7 +889,7 @@ def plot_3d_tracks_with_camera(track3d: utils.Track3d, depth, rgb, axes=None, tr
 
 
 
-def optimize_track_main(vid: str, save_root: str, npz_folder: str, hfov: float, noise_sigma: float = None, depth: str = 'gt', num_views: int = 20):
+def optimize_track_main(vid: str, save_root: str, npz_folder: str, hfov: float, depth: str = 'gt', num_views: int = 8):
   # load raw tracks
   with open(
       osp.join(save_root, vid, vid + '-tapir_remove_drift_tracks.pkl'),
@@ -896,7 +897,7 @@ def optimize_track_main(vid: str, save_root: str, npz_folder: str, hfov: float, 
   ) as f:
     track2d = pickle.load(f)
   # load depth
-  input_dict = load_rgbd_cam(vid, save_root, npz_folder, hfov, noise_sigma = noise_sigma, depth = depth, num_views=num_views)
+  input_dict = load_rgbd_cam(vid, save_root, npz_folder, hfov, depth = depth, num_views=num_views)
   media.write_video(
     osp.join(save_root, vid, vid + '-raw_depth.mp4'),
     plot_depth_prism(input_dict['left']['depth']),
@@ -1035,10 +1036,10 @@ def main():
   parser = argparse.ArgumentParser()
   parser.add_argument('--hfov', help='horizontal fov', type=float, default=1.09375)
 
-  parser.add_argument('--num_views', help='number of views', type=int, default=20)
+  parser.add_argument('--num_views', help='number of views', type=int, default=8)
   parser.add_argument('--optimize', help='optimize tracks', type=bool, default=False)
   parser.add_argument('--filter', help='Filter tracks', type=bool, default=False)
-  parser.add_argument('--dir', help='path to views', type=str, default='/project/Thesis/kubric-private/output/multiview_36_v3/train/1')
+  parser.add_argument('--dir', help='path to views', type=str, default='/project/Thesis/data/dexycb/sub-01')
   parser.add_argument('--noise', help='Gaussian Noise Level', type=float, default=None)
   parser.add_argument('--reg_type', help='Type of optimization', type=str, choices=['full', 'depth', 'none'], default='full')
   parser.add_argument('--depth', help='Type of depth to use', type=str, choices=['gt', 'vggt', 'dust3r'], default='gt')
@@ -1049,14 +1050,19 @@ def main():
   global REG
   REG = args.reg_type
 
+  if args.num_views == 6:
+    views = [0, 1, 3, 4, 6, 7]
+  else:
+    views = list(range(args.num_views))
+
   if args.optimize:
 
-    for idx in tqdm.tqdm(range(args.num_views)):
-      optimize_track_main(f'view_{idx}', args.dir, args.dir, args.hfov, args.noise, args.depth, args.num_views)
+    for idx in tqdm.tqdm(views):
+      optimize_track_main(f'view_{idx:02d}', args.dir, args.dir, args.hfov,args.depth, args.num_views)
 
   full_tracks = []
-  for idx in range(args.num_views):
-    path = osp.join(args.dir, f'view_{idx}', f'view_{idx}' + '-optimized_tracks.pkl')
+  for idx in views:
+    path = osp.join(args.dir, f'view_{idx:02d}', f'view_{idx:02d}' + '-optimized_tracks.pkl')
     if REG == 'None':
       path = path.replace('optimized_tracks', 'tapir_remove_drift_tracks3d')
     with open(path, 'rb',) as f:

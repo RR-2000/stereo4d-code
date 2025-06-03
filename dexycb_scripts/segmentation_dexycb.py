@@ -4,7 +4,9 @@ from io import BytesIO
 import tarfile
 from six.moves import urllib
 import mediapy as media
-from kubric_utils import *
+import sys
+sys.path.append('./')
+from dexycb_utils import *
 import os.path as osp
 import numpy as np
 from PIL import Image
@@ -210,19 +212,19 @@ class SemanticSegmentor:
     return sky_masks
 
 
-def load_rgbd_cam(vid: str, root_dir: str, npz_folder: str,  hfov: float, new_imw=1, new_imh=1, noise_sigma: float = None, depth: str = 'gt', num_cams: int = 20):
+def load_rgbd_cam(vid: str, root_dir: str, npz_folder: str,  hfov: float, new_imw=1, new_imh=1, depth: str = 'gt', num_cams: int = 8):
   """load rgb, depth, and camera"""
   input_dict = {'left': {'camera': [], 'depth': [], 'video': []}}
   # Load camera
-  depths, rgbs, intrinsics_normal, intrinsics, extrinsics, cam_ID = read_cam_kubric(root_dir, int(vid.split('_')[-1]), depth_euclid = False, query_points = None, noise_sigma = noise_sigma, depth = depth, num_cams=num_cams)
+  depths, rgbs, intrinsics_normal, intrinsics, extrinsics, cam_ID = read_cam_dex(root_dir, int(vid.split('_')[-1]), query_points = None, depth = depth, num_cams=num_cams)
   nfr = len(depths)
   input_dict['nfr'] = nfr
   for fid in range(nfr):
     intr_normalized = {
         'fx': intrinsics_normal[0,0] if len(intrinsics_normal.shape) == 2 else intrinsics_normal[fid][0, 0],
-        'fy': -1*intrinsics_normal[1,1] if len(intrinsics_normal.shape) == 2 else intrinsics_normal[fid][1, 1],
-        'cx': 0.5,
-        'cy': 0.5,
+        'fy': -1*intrinsics_normal[1,1] if len(intrinsics_normal.shape) == 2 else -1*intrinsics_normal[fid][1, 1],
+        'cx': -1*intrinsics_normal[0,2] if len(intrinsics_normal.shape) == 2 else -1*intrinsics_normal[fid][0, 2],
+        'cy': -1*intrinsics_normal[1,2] if len(intrinsics_normal.shape) == 2 else -1*intrinsics_normal[fid][1, 2],
         'k1': 0,
         'k2': 0,
     }
@@ -239,9 +241,9 @@ def load_rgbd_cam(vid: str, root_dir: str, npz_folder: str,  hfov: float, new_im
   return input_dict
 
 
-def segmentation_main(vid: str, save_root: str, npz_folder: str, hfov: float, noise_sigma: float = None, depth: str = 'gt', num_cams: int = 20):
+def segmentation_main(vid: str, save_root: str, npz_folder: str, hfov: float, depth: str = 'gt', num_cams: int = 8):
   semantic_segmentor = SemanticSegmentor()
-  video = read_images_from_directory(dir = osp.join(save_root, vid), prefix = 'rgb')[..., :3]
+  video = read_images_from_directory(dir = osp.join(save_root, vid, 'rgb'), prefix = None)[..., :3]
   seg_maps = []
   for fid in tqdm.tqdm(range(len(video))):
     original_im = Image.fromarray(video[fid])
@@ -254,7 +256,7 @@ def segmentation_main(vid: str, save_root: str, npz_folder: str, hfov: float, no
   ) as f:
     track2d = pickle.load(f)
 
-  input_dict = load_rgbd_cam(vid, save_root, npz_folder, hfov, noise_sigma, depth=depth, num_cams=num_cams)
+  input_dict = load_rgbd_cam(vid, save_root, npz_folder, hfov, depth=depth, num_cams=num_cams)
 
   track3d = utils.Track3d(
       track2d['tracks'],
@@ -322,16 +324,20 @@ def main():
   parser = argparse.ArgumentParser()
   parser.add_argument('--hfov', help='horizontal fov', type=float, default=1.09375)
 
-  parser.add_argument('--num_views', help='number of views', type=int, default=20)
-  parser.add_argument('--dir', help='path to views', type=str, default='/project/Thesis/kubric-private/output/multiview_36_v3/train/1')
+  parser.add_argument('--num_views', help='number of views', type=int, default=8)
+  parser.add_argument('--dir', help='path to views', type=str, default='/project/Thesis/data/dexycb/sub-01')
   parser.add_argument('--depth', help='Type of depth to use', type=str, choices=['gt', 'vggt', 'dust3r'], default='gt')
-  parser.add_argument('--noise', help='Gaussian Noise Level', type=float, default=None)
 
   args = parser.parse_args()
 
-  for idx in range(args.num_views):
+  if args.num_views == 6:
+    views = [0, 1, 3, 4, 6, 7]
+  else:
+    views = list(range(args.num_views))
 
-    segmentation_main(f'view_{idx}', args.dir, args.dir, args.hfov, args.noise, args.depth, args.num_views)
+  for idx in views:
+
+    segmentation_main(f'view_{idx:02d}', args.dir, args.dir, args.hfov, args.depth, args.num_views)
 
 
 if __name__ == '__main__':
