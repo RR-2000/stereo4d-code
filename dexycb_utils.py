@@ -176,11 +176,15 @@ def read_cam_dex_dust3r(sequence :str, idx :int, depth_euclid = False, query_poi
     # Read DUST3R depth files
     depth_dir = os.path.join(sequence, f'{duster_label}')
     depth_files = sorted(glob.glob(depth_dir + f'/*_scene.npz'))
+    if num_cams == 6:
+        idx_depth = idx - 2 if idx > 4 else idx -1 if idx > 1 else idx # Adjust index for 6-camera setup
+    else:
+        idx_depth = idx
     depth = []
     for depth_file in depth_files:
         depth_data = np.load(depth_file)
         depth.append(cv2.resize(
-                depth_data['depths'][idx], (h, w), interpolation=cv2.INTER_NEAREST
+                depth_data['depths'][idx_depth], (h, w), interpolation=cv2.INTER_NEAREST
             ))
     depth = np.asarray(depth)
     depth = np.clip(depth, None, 4.0)  # Clamp depth to a maximum of 4.0 meters

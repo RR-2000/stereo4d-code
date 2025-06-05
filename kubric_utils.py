@@ -358,7 +358,7 @@ def read_cam_kubric_dust3r(sequence :str, idx :int, depth_euclid = False, query_
     elif num_cams == 8:
         duster_label = 'duster-views-01234567'
     elif num_cams == 6:
-        duster_label = 'duster-views-013467'
+        duster_label = 'duster-views-012345'
     elif num_cams == 4:
         duster_label = 'duster-views-0123'
 

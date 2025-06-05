@@ -424,7 +424,7 @@ def load_rgbd_cam(vid: str, root_dir: str, npz_folder: str,  hfov: float, new_im
   """load rgb, depth, and camera"""
   input_dict = {'left': {'camera': [], 'depth': [], 'video': []}}
   # Load camera
-  depths, rgbs, intrinsics_normal, intrinsics, extrinsics, cam_ID = read_cam_kubric(root_dir, int(vid.split('_')[-1]), depth_euclid = False, query_points = None, noise_sigma = noise_sigma, depth = depth, num_views=num_views)
+  depths, rgbs, intrinsics_normal, intrinsics, extrinsics, cam_ID = read_cam_kubric(root_dir, int(vid.split('_')[-1]), depth_euclid = False, query_points = None, noise_sigma = noise_sigma, depth = depth, num_cams=num_views)
   nfr = len(depths)
   input_dict['nfr'] = nfr
   for fid in range(nfr):
