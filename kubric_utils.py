@@ -256,7 +256,7 @@ def read_cam_kubric_vggt(sequence :str, idx :int, depth_euclid = False, query_po
     elif num_cams == 4:
         vggt_label = 'vggt_kubric_views_0123_v2'
 
-    vggt_path = os.path.join(sequence, f'{vggt_label}/1',  f'view_{idx}')
+    vggt_path = os.path.join(sequence, f'{vggt_label}',  f'view_{idx}')
     num_frame = len(glob.glob(vggt_path + '/*.npz'))
     extrinsics = []
     intrinsics = []

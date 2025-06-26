@@ -72,7 +72,7 @@ def read_cam_dex_gt(sequence :str, idx :int, query_points = None):
     depth = np.clip(depth, None, 4.0)  # Clamp depth to a maximum of 4.0 meters
 
     imgs = read_images_from_directory(os.path.join(sequence, f'view_{idx:02d}', 'rgb'))
-    w, h = imgs.shape[1:3]
+    h, w = imgs.shape[1:3]
 
     # Normalize intrinsics
     intrinsics_normal = np.diag([1/w, 1/h, 1]) @ intrinsics @ np.diag([1, -1, -1])
@@ -100,7 +100,7 @@ def read_cam_dex_vggt(sequence :str, idx :int, depth_euclid = False, query_point
         vggt_label = 'vggt_dex_views_0123_v2'
 
     cam_ID = idx
-    vggt_path = os.path.join(sequence, f'{vggt_label}/subject-01',  f'view_{idx:02d}')
+    vggt_path = os.path.join(sequence, f'{vggt_label}',  f'view_{idx:02d}')
     num_frame = len(glob.glob(vggt_path + '/*.npz'))
     depth = []
     for frame_id in range(num_frame):
@@ -142,7 +142,7 @@ def read_cam_dex_vggt(sequence :str, idx :int, depth_euclid = False, query_point
     # Read RGB images (drop alpha channel)
     imgs = read_images_from_directory(os.path.join(sequence, f'view_{idx:02d}', 'rgb'), prefix=None)[..., :3]
     
-    w, h = imgs.shape[1:3]
+    h, w = imgs.shape[1:3]
     # Normalize intrinsics
     intrinsics_normal = np.diag([1/w, 1/h, 1]) @ intrinsics @ np.diag([1, -1, -1])
 
@@ -171,7 +171,7 @@ def read_cam_dex_dust3r(sequence :str, idx :int, depth_euclid = False, query_poi
 
     # Read RGB images (drop alpha channel)
     imgs = read_images_from_directory(os.path.join(sequence, f'view_{idx:02d}', 'rgb'), prefix=None)[..., :3]
-    w, h = imgs.shape[1:3]
+    h, w = imgs.shape[1:3]
 
     # Read DUST3R depth files
     depth_dir = os.path.join(sequence, f'{duster_label}')
@@ -184,7 +184,7 @@ def read_cam_dex_dust3r(sequence :str, idx :int, depth_euclid = False, query_poi
     for depth_file in depth_files:
         depth_data = np.load(depth_file)
         depth.append(cv2.resize(
-                depth_data['depths'][idx_depth], (h, w), interpolation=cv2.INTER_NEAREST
+                depth_data['depths'][idx_depth], (w, h), interpolation=cv2.INTER_NEAREST
             ))
     depth = np.asarray(depth)
     depth = np.clip(depth, None, 4.0)  # Clamp depth to a maximum of 4.0 meters
@@ -220,5 +220,6 @@ def read_cam_dex_dust3r(sequence :str, idx :int, depth_euclid = False, query_poi
     
     # Normalize intrinsics
     intrinsics_normal = np.diag([1/w, 1/h, 1]) @ intrinsics @ np.diag([1, -1, -1])
+    print(np.diag([1/w, 1/h, 1]))
 
     return depth, imgs, intrinsics_normal, intrinsics, extrinsics, cam_ID

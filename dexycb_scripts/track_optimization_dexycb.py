@@ -1070,7 +1070,14 @@ def main():
       full_tracks.append(arr['track3d'] if 'track3d' in arr else arr)
       print(f"Full tracks shape for {idx}th view: {full_tracks[-1].shape}")
 
+
   full_tracks = np.concatenate(full_tracks, axis=0)
+  # save all tracks
+  file_name = f'stereo4d_tracks_{args.noise}_{args.exp}' if args.noise is not None else f'stereo4d_track_{args.exp}_all'
+  np.save(osp.join(args.dir, file_name),full_tracks.transpose(1,0,2))
+
+  # saveing filtered tracks
+
   invalid = np.any(np.isnan(full_tracks.reshape(full_tracks.shape[0], -1)), axis= 1)
   full_tracks = full_tracks[ ~invalid].transpose(1,0,2)
 

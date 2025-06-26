@@ -1052,19 +1052,33 @@ def main():
   if args.optimize:
 
     for idx in tqdm.tqdm(range(args.num_views)):
-      optimize_track_main(f'view_{idx}', args.dir, args.dir, args.hfov, args.noise, args.depth, args.num_views)
+      try:
+        optimize_track_main(f'view_{idx}', args.dir, args.dir, args.hfov, args.noise, args.depth, args.num_views)
+      except Exception as e:
+        print(f"Error optimizing view_{idx}: {e}")
+        continue
 
   full_tracks = []
   for idx in range(args.num_views):
     path = osp.join(args.dir, f'view_{idx}', f'view_{idx}' + '-optimized_tracks.pkl')
     if REG == 'None':
       path = path.replace('optimized_tracks', 'tapir_remove_drift_tracks3d')
+
+    if not osp.exists(path):
+      print(f"Warning: {path} does not exist, skipping view {idx}")
+      continue
     with open(path, 'rb',) as f:
       arr = pickle.load(f)
       full_tracks.append(arr['track3d'] if 'track3d' in arr else arr)
       print(f"Full tracks shape for {idx}th view: {full_tracks[-1].shape}")
 
   full_tracks = np.concatenate(full_tracks, axis=0)
+
+  # save all tracks
+  file_name = f'stereo4d_tracks_{args.noise}_{args.exp}' if args.noise is not None else f'stereo4d_track_{args.exp}_all'
+  np.save(osp.join(args.dir, file_name),full_tracks.transpose(1,0,2))
+
+  # saving filtered tracks
   invalid = np.any(np.isnan(full_tracks.reshape(full_tracks.shape[0], -1)), axis= 1)
   full_tracks = full_tracks[ ~invalid].transpose(1,0,2)
 

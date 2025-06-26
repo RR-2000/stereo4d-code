@@ -317,6 +317,11 @@ def segmentation_main(vid: str, save_root: str, npz_folder: str, hfov: float, no
   ) as f:
     pickle.dump(track2d_filtered, f)
 
+  with open(
+      osp.join(save_root, vid, vid + '-filtered_3d.pkl'), 'wb'
+  ) as f:
+    pickle.dump(track2d_filtered, f)
+
 
 def main():
   parser = argparse.ArgumentParser()
